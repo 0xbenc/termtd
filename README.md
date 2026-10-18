@@ -10,7 +10,7 @@ Written in Go. Zero dependencies.
 
 ## Get it
 
-Download it from [itch.io](https://kairuku-studios.itch.io/termtd) and use the Play
+Download it from [itch.io](https://tty-games.itch.io/termtd) and use the Play
 launcher, or install it from my Homebrew tap:
 
 ```sh
@@ -103,3 +103,7 @@ prereleases go only to tty.games testing. To recover a destination failure, use
 existing tag and choose the destination. No rebuild or new tag is needed. The
 first tag supporting this recovery workflow is v1.4.3-rc.1. Publishing an older
 version cannot move tty.games stable backward.
+
+The itch account is now `tty-games`; set the GitHub Actions repository variable
+`ITCH_TARGET` to `tty-games/termtd`. An account rename requires updating this
+Butler destination even when old browser URLs redirect.
