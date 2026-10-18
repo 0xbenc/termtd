@@ -1,0 +1,21 @@
+{
+  "game": "termtd",
+  "install": {
+    "command": "termtd",
+    "files": [
+      "LICENSE",
+      "README.md",
+      "LORE.md",
+      "PLAYING.md"
+    ],
+    "save_files": [
+      ".termtd-hiscores.json",
+      ".termtd-journal.json",
+      ".termtd-lair.json",
+      ".tdef-hiscores.json",
+      ".tdef-journal.json",
+      ".tdef-lair.json"
+    ],
+    "save_schema": "termtd-v1"
+  }
+}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/0xbenc/termtd/game"
+	"github.com/0xbenc/termtd/hiscore"
 	"github.com/0xbenc/termtd/internal/buildinfo"
 	"github.com/0xbenc/termtd/render"
 	"github.com/0xbenc/termtd/tui"
@@ -26,6 +27,20 @@ func main() {
 	switch os.Args[1] {
 	case "version", "--version", "-version":
 		fmt.Printf("termtd %s\n", version)
+	case "saves":
+		flags := flag.NewFlagSet("saves", flag.ExitOnError)
+		asJSON := flags.Bool("json", false, "print a machine-readable save report")
+		flags.Parse(os.Args[2:])
+		report, err := hiscore.Inspect()
+		if err != nil {
+			die("%v", err)
+		}
+		if err = hiscore.WriteReport(os.Stdout, report, *asJSON); err != nil {
+			die("%v", err)
+		}
+		if !report.Healthy {
+			os.Exit(1)
+		}
 	case "play":
 		play(os.Args[2:])
 	case "bench":
@@ -138,6 +153,7 @@ func usage() {
 
 usage:
   termtd [play flags]        play (default: title -> menu -> the lair)
+  termtd saves [--json]      inspect save locations and readability without changes
   termtd bench [flags]       run autoplay balance benchmark
   termtd headless [flags]    run one autoplay game, print result
   termtd capture [flags]     render headless game frames to files

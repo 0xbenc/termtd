@@ -25,6 +25,8 @@ jobs:
       - name: Vet and test
         shell: bash
         run: go vet ./... && go test ./...
+      - name: Test release replay
+        run: python -m unittest discover -s packaging/tty -p 'test_*.py'
       - name: Test Homebrew formula renderer
         run: python -m unittest discover -s packaging/homebrew -p 'test_*.py'
       - name: Test itch packaging and launchers

@@ -166,3 +166,41 @@ class ItchPackagingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class RetainedReleaseTest(unittest.TestCase):
+    def test_restages_retained_archives_without_build_metadata(self):
+        import hashlib
+        import io
+        import tarfile
+        import zipfile
+        from stage import release_binaries
+        with tempfile.TemporaryDirectory() as directory:
+            dist = pathlib.Path(directory)
+            checksums = []
+            for system, arch in TARGETS:
+                entry = 'termtd.exe' if system == 'windows' else 'termtd'
+                extension = 'zip' if system == 'windows' else 'tar.gz'
+                path = dist / f'termtd_1.4.3_{system}_{arch}.{extension}'
+                names = [entry, 'LICENSE', 'README.md', 'LORE.md', 'PLAYING.md']
+                if system == 'windows':
+                    with zipfile.ZipFile(path, 'w') as archive:
+                        for name in names:
+                            archive.writestr(name, b'exact release bytes')
+                else:
+                    with tarfile.open(path, 'w:gz') as archive:
+                        for name in names:
+                            data = b'exact release bytes'
+                            info = tarfile.TarInfo(name)
+                            info.size = len(data)
+                            info.mode = 0o755
+                            archive.addfile(info, io.BytesIO(data))
+                checksums.append(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name)
+            (dist / 'checksums.txt').write_text('\n'.join(checksums) + '\n')
+            binaries = release_binaries(dist, '1.4.3')
+            self.assertEqual(set(binaries), set(TARGETS))
+            for binary in binaries.values():
+                self.assertEqual(binary.read_bytes(), b'exact release bytes')
+            stage(dist, dist / 'itch', 'v1.4.3')
+            path.write_bytes(b'corrupt')
+            with self.assertRaisesRegex(ValueError, 'checksum'):
+                release_binaries(dist, '1.4.3')

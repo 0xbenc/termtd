@@ -2,6 +2,9 @@
 """Package GoReleaser's exact binaries with itch Play launchers and manifests."""
 import argparse
 import json
+import hashlib
+import tarfile
+import zipfile
 import pathlib
 import plistlib
 import re
@@ -25,24 +28,67 @@ def executable(source: pathlib.Path, destination: pathlib.Path) -> None:
     destination.chmod(0o755)
 
 
-def stage(dist: pathlib.Path, out: pathlib.Path) -> None:
-    metadata = json.loads((dist / "metadata.json").read_text())
+def release_binaries(dist: pathlib.Path, version: str) -> dict:
+    """Recover exact executables from retained archives; never rebuild a release."""
+    sums = {}
+    for line in (dist / "checksums.txt").read_text().splitlines():
+        sha, name = line.split()
+        if not re.fullmatch(r"[a-f0-9]{64}", sha) or name in sums:
+            raise ValueError("invalid checksums")
+        sums[name] = sha
+    result = {}
+    for system, arch in TARGETS:
+        entry = "termtd.exe" if system == "windows" else "termtd"
+        extension = "zip" if system == "windows" else "tar.gz"
+        archive = dist / f"termtd_{version}_{system}_{arch}.{extension}"
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != sums.get(archive.name):
+            raise ValueError("archive checksum mismatch")
+        expected = {entry, "LICENSE", "README.md", "LORE.md", "PLAYING.md"}
+        if system == "windows":
+            with zipfile.ZipFile(archive) as z:
+                if len(z.infolist()) != len(expected) or set(z.namelist()) != expected:
+                    raise ValueError("unexpected archive members")
+                for f in z.infolist():
+                    if f.is_dir() or f.file_size > 128 << 20 or (f.external_attr >> 16) & 0o170000 not in (0, 0o100000):
+                        raise ValueError("unsafe archive member")
+                data = z.read(entry)
+        else:
+            with tarfile.open(archive, "r:gz") as z:
+                members = z.getmembers()
+                if len(members) != len(expected) or {f.name for f in members} != expected:
+                    raise ValueError("unexpected archive members")
+                if any(not f.isfile() or f.size > 128 << 20 for f in members):
+                    raise ValueError("unsafe archive member")
+                data = z.extractfile(entry).read(128 << 20 | 1)
+        target = dist / "recovered" / (system + "-" + arch) / entry
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        target.chmod(0o755)
+        result[(system, arch)] = target
+    return result
+
+
+def stage(dist: pathlib.Path, out: pathlib.Path, release_version=None) -> None:
+    metadata = {"version": release_version} if release_version else json.loads((dist / "metadata.json").read_text())
     version = metadata["version"].removeprefix("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", version):
         raise ValueError("invalid release version")
-    binaries = {}
-    for artifact in json.loads((dist / "artifacts.json").read_text()):
-        if artifact["type"] != "Binary" or artifact.get("extra", {}).get("ID") != "termtd":
-            continue
-        target = (artifact["goos"], artifact["goarch"])
-        if target not in TARGETS:
-            continue
-        if target in binaries:
-            raise ValueError(f"duplicate binary for {target}")
-        path = pathlib.Path(artifact["path"])
-        if not path.is_file():
-            raise ValueError(f"missing binary: {path}")
-        binaries[target] = path
+    if release_version:
+        binaries = release_binaries(dist, version)
+    else:
+        binaries = {}
+        for artifact in json.loads((dist / "artifacts.json").read_text()):
+            if artifact["type"] != "Binary" or artifact.get("extra", {}).get("ID") != "termtd":
+                continue
+            target = (artifact["goos"], artifact["goarch"])
+            if target not in TARGETS:
+                continue
+            if target in binaries:
+                raise ValueError(f"duplicate binary for {target}")
+            path = pathlib.Path(artifact["path"])
+            if not path.is_file():
+                raise ValueError(f"missing binary: {path}")
+            binaries[target] = path
     if set(binaries) != set(TARGETS):
         raise ValueError(f"missing release targets: {set(TARGETS) - set(binaries)}")
     for target, channel in TARGETS.items():
@@ -92,9 +138,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", type=pathlib.Path, default=pathlib.Path("dist"))
     parser.add_argument("--out", type=pathlib.Path, default=pathlib.Path("dist/itch"))
+    parser.add_argument("--version", help="restage an existing release from verified archives")
     parser.add_argument("--zip", action="store_true", help="also create portable ZIP downloads preserving execute bits")
     args = parser.parse_args()
-    stage(args.dist, args.out)
+    stage(args.dist, args.out, args.version)
     if args.zip:
         for channel in TARGETS.values():
             shutil.make_archive(str(args.out / channel), "zip", root_dir=args.out, base_dir=channel)

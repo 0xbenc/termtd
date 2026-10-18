@@ -30,6 +30,8 @@ jobs:
       - name: Vet and test
         shell: bash
         run: go vet ./... && go test ./...
+      - name: Test release replay
+        run: python -m unittest discover -s packaging/tty -p 'test_*.py'
       - name: Test Homebrew formula renderer
         run: python -m unittest discover -s packaging/homebrew -p 'test_*.py'
       - name: Test itch packaging and launchers
@@ -47,21 +49,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Check publishing configuration before a stable release
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-          ITCH_TARGET: ${{ vars.ITCH_TARGET }}
-        run: |
-          if [ -z "${TAP_GITHUB_TOKEN:-}" ]; then
-            echo "Set TAP_GITHUB_TOKEN with Contents write access to 0xbenc/homebrew-tap before releasing." >&2
-            exit 1
-          fi
-          if [ -z "${BUTLER_API_KEY:-}" ] || [ -z "${ITCH_TARGET:-}" ]; then
-            echo "Configure BUTLER_API_KEY and ITCH_TARGET before releasing to itch.io." >&2
-            exit 1
-          fi
       - name: Install syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
       - name: Run GoReleaser
@@ -72,8 +59,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Package itch Play launchers
-        run: python3 packaging/itch/stage.py
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
@@ -82,84 +67,12 @@ jobs:
             dist/*.zip
             dist/*.sbom.json
             dist/checksums.txt
-      - name: Preserve release binaries for both publishers
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-artifacts
-          path: dist/
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
 
-  homebrew:
-    name: Publish Homebrew tap
+  publish:
+    name: Publish release destinations
     needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: release-artifacts
-          path: dist/
-      # Follow uuid's formula publisher so both Linux and macOS use the tap.
-      - name: Publish Homebrew formula
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          gh auth setup-git
-          git clone --depth 1 --branch main https://github.com/0xbenc/homebrew-tap.git tap
-          python3 packaging/homebrew/render.py "$VERSION" dist/checksums.txt tap/Formula/termtd.rb
-          cd tap
-          git config user.name goreleaserbot
-          git config user.email goreleaserbot@users.noreply.github.com
-          git add Formula/termtd.rb
-          if git diff --cached --quiet; then
-            echo "formula already current for $VERSION"
-            exit 0
-          fi
-          git commit -m "Brew formula update for termtd version $VERSION"
-          # Another project can update this shared tap during our release.
-          for attempt in 1 2 3; do
-            git pull --rebase origin main
-            if git push origin HEAD:main; then exit 0; fi
-            echo "Tap push attempt $attempt failed; retrying after rebase." >&2
-          done
-          echo "Could not publish the formula after three attempts." >&2
-          exit 1
-
-  itch:
-    name: Publish itch.io builds
-    needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: release-artifacts
-          path: dist/
-      # Artifact downloads don't preserve execute bits. Restage with explicit
-      # permissions using the exact binaries produced by GoReleaser.
-      - name: Restage itch packages
-        run: python3 packaging/itch/stage.py
-      - name: Install pinned Butler
-        run: bash packaging/itch/install-butler.sh "$RUNNER_TEMP/termtd-butler"
-      - name: Validate and publish itch channels
-        env:
-          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-          ITCH_TARGET: ${{ vars.ITCH_TARGET }}
-          RELEASE_VERSION: ${{ github.ref_name }}
-        run: |
-          python3 packaging/itch/publish.py \
-            --target "$ITCH_TARGET" --version "$RELEASE_VERSION" \
-            --butler "$RUNNER_TEMP/termtd-butler/butler"
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ github.ref_name }}
+      destination: all
+    secrets: inherit

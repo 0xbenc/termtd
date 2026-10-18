@@ -82,3 +82,24 @@ To start over, choose **Reset progress** in the main menu, then confirm
 **Reset all progress**. This clears your campaign, relics, journal, and high scores.
 
 [Story](LORE.md) · [Lore sources](https://github.com/0xbenc/termtd/blob/main/LORE-SOURCES.md) · [Field guide](PLAYING.md) · [Release setup](https://github.com/0xbenc/termtd/blob/main/RELEASING.md) · [MIT license](LICENSE)
+
+### Inspecting saves and updating
+
+Run `termtd saves` to see the save locations and check whether this build can
+read them, or `termtd saves --json` for a machine-readable report. This command
+never rewrites, repairs or migrates files. Missing files are normal on a first
+run; unreadable or invalid files produce a nonzero exit status. The existing
+save format remains `termtd-v1` in 1.4.3.
+
+Update with the tool that installed your copy: Homebrew, itch, or the terminal
+installer at `ssh tty.games`. Close the game before updating. tty.games asks
+before replacing its own executable and backs up existing saves; it does not
+update a Homebrew or itch installation. Keep backups before changing versions.
+
+Release publishing builds once and sends the retained artifacts independently
+to Homebrew, itch and tty.games. Stable tags publish after tests and verification;
+prereleases go only to tty.games testing. To recover a destination failure, use
+**Actions → Publish existing release → Run workflow**, select `main`, enter the
+existing tag and choose the destination. No rebuild or new tag is needed. The
+first tag supporting this recovery workflow is v1.4.3-rc.1. Publishing an older
+version cannot move tty.games stable backward.
