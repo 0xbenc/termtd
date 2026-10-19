@@ -1,27 +1,55 @@
 # Releasing TERMTD
 
-Each stable tag produces one set of release binaries and publishes through two
-routes: itch.io with Butler and terminal-opening Play launchers, and the
-Homebrew formula path used by `0xbenc/uuid`.
+A stable tag builds one immutable GitHub release, then independently publishes
+**tty.games, Homebrew and itch.io**. Current verified stable release: **v1.4.4**.
+The workflows, not historical commands below, define the publication behavior.
 
-1. Push a stable `vX.Y.Z` tag.
-2. GitHub Actions vets and tests on Linux, macOS, and Windows.
-3. GoReleaser builds Linux/macOS/Windows binaries for amd64/arm64, archives the binary
-   with the documentation, and publishes checksums and SBOMs to GitHub Releases.
-4. The workflow builds itch packages from those exact binaries and attests the
-   GitHub release archives.
-5. Independent jobs publish the packages to `kairuku-studios/termtd` with Butler
-   and render/push `Formula/termtd.rb` to `0xbenc/homebrew-tap` from the archive
-   checksums. A failure in one publishing job does not prevent the other job
-   from running.
+1. Push a committed `vX.Y.Z` tag.
+2. GitHub Actions vets/tests on Linux, macOS and Windows, including packaging tests.
+3. GoReleaser builds amd64/arm64 for all three OSes, archives the executables and
+   support files, and publishes checksums and SBOMs. Actions attests provenance.
+   `GORELEASER_CURRENT_TAG` pins the exact triggering tag.
+4. `.github/workflows/publish.yml` fetches the retained release archives, verifies
+   both GitHub asset digests and `checksums.txt`, and fans out to three publishers.
+   Destination configuration failures do not block the GitHub build or other jobs.
+5. itch restages Play bundles from those exact binaries; Homebrew updates
+   `Formula/termtd.rb` in `0xbenc/homebrew-tap`; tty.games verifies and stores the
+   immutable archives before activating its stable channel.
 
-Install a published stable release with `brew install 0xbenc/tap/termtd`.
-Prerelease tags such as `v1.0.0-rc1` publish GitHub release assets but leave both
-the tap and itch's stable channels on their last stable versions.
+Install through Homebrew with `brew install 0xbenc/tap/termtd`.
+Prerelease tags publish GitHub assets and tty.games **testing** only; stable
+Homebrew and itch channels remain unchanged.
+
+## tty.games
+
+`tty-release.json` declares the command, support files and reviewed save contract.
+`packaging/tty/tool.json` pins the shared publisher's URL and SHA-256. The helper
+uses `/publish/v1/releases` for stable and `/dev/publish/v1/releases` for testing.
+GitHub OIDC authenticates the repository, workflow, source commit and tag; no AWS
+key or long-lived tty.games secret is stored in this game's Actions settings.
+
+The deployed server policy must authorize this game and its exact install/save
+contract and platform set. Server-side AWS permissions provide scoped immutable
+S3 uploads. Identical retries succeed; conflicting releases and backward channel
+updates fail. Players explicitly install/update through the storefront; updates
+preserve the reviewed save contract and back up saves.
+
+## Retry an existing release
+
+In Actions, run **Publish existing release** from `main`, supply the existing tag,
+and choose `tty`, `homebrew`, `itch`, or `all`. Recovery downloads the retained
+release; it does not rebuild or require a new tag. Homebrew rejects downgrades;
+itch requires the latest stable GitHub release. Support begins at v1.4.3-rc.1.
+
+Verified example: v1.4.4 release run 39098534082 succeeded for the build, tty.games
+and Homebrew. Its itch job failed after the account rename. The itch-only retry
+39098967683 succeeded, with the other destinations skipped. Current itch target:
+`tty-games/termtd`. Do not interpret the original run's failure as all destinations
+having failed.
 
 ## itch packages
 
-The itch destination is <https://kairuku-studios.itch.io/termtd>. Each build has an
+The itch destination is <https://tty-games.itch.io/termtd>. Each build has an
 explicit `.itch.toml` Play action and instructions in `README-PLAY.txt`:
 
 | Channel | Player's launcher |
@@ -82,13 +110,14 @@ Alternatively, supply a dedicated tap token through the private prompt:
 gh secret set TAP_GITHUB_TOKEN --repo 0xbenc/termtd
 ```
 
-Stable releases fail before publication when this secret is absent.
+A missing tap secret fails only the Homebrew publishing job; the GitHub release
+and other destinations remain independent.
 The regular `GITHUB_TOKEN` is supplied
 by Actions for publishing the TERMTD release itself.
 
 The following itch settings are configured on `0xbenc/termtd`:
 
-- Actions variable `ITCH_TARGET`: `kairuku-studios/termtd`.
+- Actions variable `ITCH_TARGET`: `tty-games/termtd`.
 - Actions secret `BUTLER_API_KEY`: copied directly from the local Butler login.
 
 If the itch credential needs renewal, run `butler login` locally, then transfer
@@ -99,15 +128,18 @@ gh secret set BUTLER_API_KEY --repo 0xbenc/termtd < ~/.config/itch/butler_creds
 ```
 
 See [Butler authentication](https://itch.io/docs/butler/login.html) for the
-credential location on other OSes. Both publisher credentials and `ITCH_TARGET`
-are checked before a stable GitHub release is published.
+credential location on other OSes. Each destination checks its own credentials when its publishing job runs.
+Missing itch credentials do not block the GitHub release, tty.games or Homebrew.
+
+The setup commands above document credential provisioning; they do not prove
+credentials are available on every workstation. Never print credential values.
 
 ## Prepare a release
 
-The current release line is 1.4.2. Use the intended version consistently in the
+The currently verified stable release is 1.4.4. Use a new, unused version consistently in the
 release tag, itch user version, release notes, and post-release checks. Examples
-below use `VERSION=1.4.2`; change that value for another release. Prerelease tags
-publish GitHub assets without updating the stable itch or Homebrew channels.
+below use `VERSION=1.4.5` as the next-version example; check tags before choosing it. Prerelease tags
+publish GitHub assets and tty.games testing without updating stable itch or Homebrew channels.
 
 Player archives contain LICENSE, README.md, LORE.md, and PLAYING.md. The lore
 summary follows the current opening and avoids ending spoilers. Development
@@ -154,8 +186,8 @@ the console settings and startup errors remain visible through Play.cmd.
 To preview the stable channel commands using staged stable-version packages:
 
 ```sh
-VERSION=1.4.2
-python3 packaging/itch/publish.py --target kairuku-studios/termtd --version "$VERSION" --dry-run
+VERSION=1.4.5
+python3 packaging/itch/publish.py --target tty-games/termtd --version "$VERSION" --dry-run
 ```
 
 Remove `--dry-run` only when intentionally publishing those staged packages.
@@ -163,7 +195,7 @@ Remove `--dry-run` only when intentionally publishing those staged packages.
 When ready to publish the committed revision:
 
 ```sh
-VERSION=1.4.2
+VERSION=1.4.5
 git tag -a "v$VERSION" -m "TERMTD $VERSION"
 git push origin main
 git push origin "v$VERSION"
@@ -176,7 +208,7 @@ brew update
 brew install 0xbenc/tap/termtd
 termtd --version
 brew test 0xbenc/tap/termtd
-butler status kairuku-studios/termtd
+butler status tty-games/termtd
 ```
 
 If the GitHub release succeeds but the tap push fails, use its existing
